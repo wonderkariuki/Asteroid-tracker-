@@ -1,0 +1,18 @@
+# Asks Vercel to rebuild the site every day, which downloads fresh data from JPL.
+# VERCEL_DEPLOY_HOOK is a repository secret holding the URL from Vercel's Deploy Hooks settings.
+name: Refresh site data
+
+on:
+  schedule:
+    - cron: "30 3 * * *"   # every day at 03:30 UTC
+  workflow_dispatch:       # adds a "Run workflow" button on the Actions tab
+
+permissions: {}
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl --fail --silent --show-error -X POST "$DEPLOY_HOOK"
+        env:
+          DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}

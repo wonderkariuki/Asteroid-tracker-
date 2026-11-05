@@ -292,7 +292,7 @@
 
         const container = document.getElementById('main-container');
         const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
-        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));   // phones can report 3 or more, which is slow to draw
         renderer.setSize(window.innerWidth, window.innerHeight);
         container.appendChild(renderer.domElement);
 
@@ -781,6 +781,70 @@
         const info = document.getElementById('info');
         const elemFromRow = r => buildElem(+r.a_au, +r.e, +r.i_deg, +r.om_deg, +r.w_deg, +r.ma_deg, +r.epoch_jd);
 
+        // Where the data comes from. Online (Vercel) there is no server, so build_site.py's files in
+        // data/ stand in for main.py. The presence of data/meta.json tells the two apart.
+        const staticMeta = fetch('data/meta.json').then(r => r.ok ? r.json() : null).catch(() => null);
+
+        async function getJson(url) {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? res.status);
+            return res.json();
+        }
+
+        let catalogue = null;
+        function staticCatalogue() {
+            catalogue ??= getJson('data/asteroids.json').then(rows => {
+                const list = rows.map(([spk_id, full_name, pdes, pha, moid, h_mag, diameter_km, albedo, rot_per, spec_type, epoch_jd, a_au, e, i_deg, om_deg, w_deg, ma_deg]) =>
+                    ({ spk_id, name: full_name, full_name, pdes, pha, moid, h_mag, diameter_km, albedo, rot_per, spec_type, epoch_jd, a_au, e, i_deg, om_deg, w_deg, ma_deg }));
+                return { list, byId: new Map(list.map(r => [r.spk_id, r])) };
+            });
+            return catalogue;
+        }
+
+        // Must match shard_of() in build_site.py
+        function approachShard(des, shards) {
+            let x = 5381;
+            for (const c of des) x = (Math.imul(x, 33) + c.charCodeAt(0)) >>> 0;
+            return x % shards;
+        }
+
+        const source = {
+            async allAsteroids() {
+                if (await staticMeta) return [...(await staticCatalogue()).list];
+                return getJson(`${API}/all-asteroids`);
+            },
+            async search(q) {
+                if (!(await staticMeta)) return getJson(`${API}/search?q=${encodeURIComponent(q)}`);
+                const needle = q.toLowerCase();
+                return (await staticCatalogue()).list.filter(r => r.full_name.toLowerCase().includes(needle))
+                    .sort((a, b) => a.full_name < b.full_name ? -1 : 1).slice(0, 20);
+            },
+            async asteroid(id) {
+                if (!(await staticMeta)) return getJson(`${API}/asteroid/${id}`);
+                const row = (await staticCatalogue()).byId.get(id);
+                if (!row) throw new Error('No asteroid with that ID.');
+                return row;
+            },
+            async closeApproaches(des) {
+                const meta = await staticMeta;
+                if (!meta) return getJson(`${API}/close-approaches?des=${encodeURIComponent(des)}`);
+                const shard = await getJson(`data/approaches/${approachShard(des, meta.shards)}.json`);
+                return (shard[des] ?? []).map(([jd, cd, dist, v_rel]) => ({ jd, cd, dist, v_rel }));
+            },
+            async flybys(days) {
+                if (!(await staticMeta)) return getJson(`${API}/upcoming-flybys?days=${days}`);
+                const lastJd = dateToJd(Date.now()) + +days;
+                return (await getJson('data/flybys.json')).filter(f => f.jd <= lastJd);
+            },
+            async approachPath(des, jd) {
+                const meta = await staticMeta;
+                if (!meta) return getJson(`${API}/approach-path?des=${encodeURIComponent(des)}&start_jd=${jd - 1.1}&stop_jd=${jd + 1.1}&step_min=5`);
+                const known = meta.paths.find(p => p.des === des && Math.abs(p.jd - jd) < 0.01);
+                if (!known) throw new Error('only upcoming flybys have pre-built paths');
+                return getJson(`data/paths/${known.file}`);
+            },
+        };
+
         
         const sizeKm = r => r.diameter_km ?? (r.h_mag == null ? null : (1329 / Math.sqrt(r.albedo ?? 0.14)) * Math.pow(10, -r.h_mag / 5));
 
@@ -898,9 +962,10 @@
                 if (show) shown++;
             });
             attr.needsUpdate = true;
-            info.innerText = shown === swarm.count
+            info.innerText = (shown === swarm.count
                 ? `Tracking ${shown.toLocaleString()} asteroids`
-                : `Showing ${shown.toLocaleString()} of ${swarm.count.toLocaleString()} asteroids`;
+                : `Showing ${shown.toLocaleString()} of ${swarm.count.toLocaleString()} asteroids`)
+                + (swarm.updated ? ` · data from ${swarm.updated}` : '');
         }
         for (const el of [hazardBox, classFilter, sizeFilter]) el.addEventListener('change', applyFilters);
 
@@ -908,11 +973,12 @@
         async function loadSwarm() {
             try {
                 info.innerText = 'Fetching asteroids...';
-                const res = await fetch(`${API}/all-asteroids`);
-                makeSwarm((await res.json()).filter(a => a.e < 1 && a.a_au > 0));
+                const rows = await source.allAsteroids();
+                swarm.updated = (await staticMeta)?.updated;
+                makeSwarm(rows.filter(a => a.e < 1 && a.a_au > 0));
                 applyFilters();
             } catch (error) {
-                info.innerText = 'Error connecting to backend. Is main.py running? Retrying...';
+                info.innerText = 'Could not load the asteroids. Retrying...';
                 console.error(error);
                 setTimeout(loadSwarm, 5000);
             }
@@ -984,9 +1050,7 @@
             const k = dotNear(e.clientX, e.clientY);
             if (k < 0) return;
             try {
-                const res = await fetch(`${API}/asteroid/${swarm.rows[k].spk_id}`);
-                if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
-                showAsteroid(await res.json());
+                showAsteroid(await source.asteroid(swarm.rows[k].spk_id));
             } catch (err) {
                 console.error(err);
             }
@@ -1007,13 +1071,11 @@
             timer = setTimeout(async () => {
                 let matches;
                 try {
-                    const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
-                    if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
-                    matches = await res.json();
+                    matches = await source.search(q);
                 } catch (err) {
                     console.error(err);
                     results.innerHTML = '<li></li>';
-                    results.firstChild.textContent = 'Search unavailable — is main.py running?';
+                    results.firstChild.textContent = 'Search is unavailable right now. Try again shortly.';
                     return;
                 }
                 results.innerHTML = '';
@@ -1124,9 +1186,7 @@
             const forName = selected?.name;
             let rows;
             try {
-                const res = await fetch(`${API}/close-approaches?des=${encodeURIComponent(des)}`);
-                if (!res.ok) throw new Error(res.status);
-                rows = await res.json();
+                rows = await source.closeApproaches(des);
             } catch (err) {
                 console.error(err);
                 rows = null;
@@ -1134,7 +1194,7 @@
             const list = document.getElementById('approaches');
             if (!list || selected?.name !== forName) return;
             list.innerHTML = '';
-            if (!rows) { list.textContent = 'Could not reach JPL (check main.py is running).'; return; }
+            if (!rows) { list.textContent = 'Could not load close approaches. Try again shortly.'; return; }
             if (!rows.length) { list.textContent = 'None within 0.2 AU between 1950 and 2150.'; return; }
 
 
@@ -1415,12 +1475,10 @@
             flybysTitle.textContent = 'Upcoming flybys';
             let rows;
             try {
-                const res = await fetch(`${API}/upcoming-flybys?days=${flybysDays.value}`);
-                if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
-                rows = await res.json();
+                rows = await source.flybys(flybysDays.value);
             } catch (err) {
                 console.error(err);
-                if (request === flybysRequest) flybysList.textContent = 'Could not load flybys. Check main.py is running and try again.';
+                if (request === flybysRequest) flybysList.textContent = 'Could not load flybys. Try again shortly.';
                 return;
             }
             if (request !== flybysRequest) return;
@@ -1449,9 +1507,7 @@
 
         async function watchFlyby(r) {
             try {
-                const res = await fetch(`${API}/asteroid/${r.spk_id}`);
-                if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
-                showAsteroid(await res.json());
+                showAsteroid(await source.asteroid(r.spk_id));
                 watchApproach(+r.jd, +r.dist);
                
                 if (matchMedia('(max-width: 640px)').matches) toggleFlybys(false);
@@ -1471,13 +1527,11 @@
        
         async function loadPath(ast, jd) {
             try {
-                const res = await fetch(`${API}/approach-path?des=${encodeURIComponent(ast.pdes)}&start_jd=${jd - 1.1}&stop_jd=${jd + 1.1}&step_min=5`);
-                if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
-                const pts = await res.json();
+                const pts = await source.approachPath(ast.pdes, jd);
                 if (selected !== ast || pts.length < 2) return;
                 ast.path = { jd0: pts[0][0], step: pts[1][0] - pts[0][0], n: pts.length, xyz: Float64Array.from(pts.flatMap(p => p.slice(1))) };
             } catch (err) {
-                console.error('Precise path unavailable, using the orbit estimate:', err);
+                console.info('Precise path unavailable, using the orbit estimate:', err.message);
             }
         }
 

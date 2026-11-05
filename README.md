@@ -12,6 +12,9 @@ approaches at adjustable speed.
 | `index.html` | The 3D page (three.js): scene, search, time bar, keyboard controls |
 | `main.py` | FastAPI backend: serves the page and the asteroid data |
 | `ingest.py` | Downloads near-Earth asteroids from JPL into PostgreSQL |
+| `build_site.py` | Builds the online version: the page plus data files from JPL |
+| `vercel.json`, `.vercelignore` | Tell Vercel to publish the built files instead of running `main.py` |
+| `.github/workflows/refresh.yml` | Asks Vercel to rebuild every day, for fresh data |
 | `schema.sql` | Creates the database tables |
 | `asteroid_tracker.sql` | Creates the `asteroid_tracker` database |
 | `images/` | Earth and Moon textures |
@@ -70,7 +73,23 @@ Then open **http://127.0.0.1:8000**. Keep that terminal open while you use the s
 - Close approaches: JPL CNEOS close-approach API (`/close-approaches`, `/upcoming-flybys`)
 - Precise paths during close approaches: JPL Horizons (`/approach-path`)
 
+## Online version
+
+The site on Vercel runs without `main.py` or PostgreSQL. Each deployment runs `build_site.py`, which
+downloads the latest data from JPL into files and publishes them with the page. The page reads those
+files when `data/meta.json` exists. Precise JPL paths are pre-built only for upcoming flybys and
+Apophis in 2029; other passes use the page's orbit estimate.
+
+For daily updates, create a Deploy Hook in the Vercel project's Git settings, then save its URL as a
+GitHub repository secret named `VERCEL_DEPLOY_HOOK`. Treat that URL like a password.
+
+GitHub turns off scheduled jobs after 60 days without repository activity. If the "data from" date
+stops changing, turn the job back on from the repository's **Actions** tab.
+
 ## Keeping data fresh
+
+These steps are for the local version, which uses `main.py` and PostgreSQL.
+
 
 Run the loader again whenever you want the latest asteroids and orbits. It's safe to re-run:
 ```
