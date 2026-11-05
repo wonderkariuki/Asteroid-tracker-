@@ -100,7 +100,7 @@
 
 <body>
     <div id="top-left">
-        <div id="info" class="panel">Connecting to database...</div>
+        <div id="info" class="panel">Loading...</div>
         <div id="focus-bar" class="panel">
             <span>View:</span>
             <button data-focus="sun">Sun</button>
@@ -783,7 +783,13 @@
 
         // Where the data comes from. Online (Vercel) there is no server, so build_site.py's files in
         // data/ stand in for main.py. The presence of data/meta.json tells the two apart.
-        const staticMeta = fetch('data/meta.json').then(r => r.ok ? r.json() : null).catch(() => null);
+        // A failed download isn't remembered, so a brief network drop can't leave the page stuck for good.
+        let metaRequest = null;
+        function getStaticMeta() {
+            if (API) return null;   // opened from the folder or a dev server: always use main.py
+            metaRequest ??= fetch('data/meta.json').then(r => r.ok ? r.json() : null).catch(err => { metaRequest = null; throw err; });
+            return metaRequest;
+        }
 
         async function getJson(url) {
             const res = await fetch(url);
@@ -797,7 +803,7 @@
                 const list = rows.map(([spk_id, full_name, pdes, pha, moid, h_mag, diameter_km, albedo, rot_per, spec_type, epoch_jd, a_au, e, i_deg, om_deg, w_deg, ma_deg]) =>
                     ({ spk_id, name: full_name, full_name, pdes, pha, moid, h_mag, diameter_km, albedo, rot_per, spec_type, epoch_jd, a_au, e, i_deg, om_deg, w_deg, ma_deg }));
                 return { list, byId: new Map(list.map(r => [r.spk_id, r])) };
-            });
+            }).catch(err => { catalogue = null; throw err; });
             return catalogue;
         }
 
@@ -810,34 +816,34 @@
 
         const source = {
             async allAsteroids() {
-                if (await staticMeta) return [...(await staticCatalogue()).list];
+                if (await getStaticMeta()) return [...(await staticCatalogue()).list];
                 return getJson(`${API}/all-asteroids`);
             },
             async search(q) {
-                if (!(await staticMeta)) return getJson(`${API}/search?q=${encodeURIComponent(q)}`);
+                if (!(await getStaticMeta())) return getJson(`${API}/search?q=${encodeURIComponent(q)}`);
                 const needle = q.toLowerCase();
                 return (await staticCatalogue()).list.filter(r => r.full_name.toLowerCase().includes(needle))
                     .sort((a, b) => a.full_name < b.full_name ? -1 : 1).slice(0, 20);
             },
             async asteroid(id) {
-                if (!(await staticMeta)) return getJson(`${API}/asteroid/${id}`);
+                if (!(await getStaticMeta())) return getJson(`${API}/asteroid/${id}`);
                 const row = (await staticCatalogue()).byId.get(id);
                 if (!row) throw new Error('No asteroid with that ID.');
                 return row;
             },
             async closeApproaches(des) {
-                const meta = await staticMeta;
+                const meta = await getStaticMeta();
                 if (!meta) return getJson(`${API}/close-approaches?des=${encodeURIComponent(des)}`);
                 const shard = await getJson(`data/approaches/${approachShard(des, meta.shards)}.json`);
                 return (shard[des] ?? []).map(([jd, cd, dist, v_rel]) => ({ jd, cd, dist, v_rel }));
             },
             async flybys(days) {
-                if (!(await staticMeta)) return getJson(`${API}/upcoming-flybys?days=${days}`);
+                if (!(await getStaticMeta())) return getJson(`${API}/upcoming-flybys?days=${days}`);
                 const lastJd = dateToJd(Date.now()) + +days;
                 return (await getJson('data/flybys.json')).filter(f => f.jd <= lastJd);
             },
             async approachPath(des, jd) {
-                const meta = await staticMeta;
+                const meta = await getStaticMeta();
                 if (!meta) return getJson(`${API}/approach-path?des=${encodeURIComponent(des)}&start_jd=${jd - 1.1}&stop_jd=${jd + 1.1}&step_min=5`);
                 const known = meta.paths.find(p => p.des === des && Math.abs(p.jd - jd) < 0.01);
                 if (!known) throw new Error('only upcoming flybys have pre-built paths');
@@ -974,11 +980,11 @@
             try {
                 info.innerText = 'Fetching asteroids...';
                 const rows = await source.allAsteroids();
-                swarm.updated = (await staticMeta)?.updated;
+                swarm.updated = (await getStaticMeta())?.updated;
                 makeSwarm(rows.filter(a => a.e < 1 && a.a_au > 0));
                 applyFilters();
             } catch (error) {
-                info.innerText = 'Could not load the asteroids. Retrying...';
+                info.innerText = `Could not load the asteroids (${error.message}). Retrying...`;
                 console.error(error);
                 setTimeout(loadSwarm, 5000);
             }
