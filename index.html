@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Asteroid Tracker</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; font-family: system-ui, sans-serif; color: #e8ecf2; }
+        #main-container { width: 100vw; height: 100vh; }
+        #labels { position: absolute; inset: 0; pointer-events: none; }
+        /* No backdrop-filter blur: re-blurring the moving scene every frame cost more than drawing all the asteroids */
+        .panel { background: rgba(10, 14, 22, 0.9); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; }
+        button { background: #1d2635; color: #e8ecf2; border: 1px solid #3a4658; border-radius: 6px; padding: 5px 10px; cursor: pointer; font: inherit; font-size: 13px; }
+        button:hover:not(:disabled) { background: #2a3649; }
+        button:disabled { opacity: 0.4; cursor: default; }
+        button.active { border-color: #6aa9ff; color: #9cc6ff; }
+
+        #top-left { position: absolute; top: 10px; left: 10px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: calc(100vw - 20px); z-index: 100; }
+        #info { padding: 8px 12px; font-size: 14px; }
+        #focus-bar, #filter-bar { padding: 6px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+        #focus-bar label, #filter-bar label { display: flex; gap: 4px; align-items: center; margin-left: 4px; cursor: pointer; }
+        #filter-bar select { background: #1d2635; color: inherit; border: 1px solid #3a4658; border-radius: 6px; padding: 3px 4px; font: inherit; }
+
+        #search-panel { position: absolute; top: 10px; right: 10px; width: 320px; max-width: calc(100vw - 20px); z-index: 100; }
+        #search-box { width: 100%; padding: 9px; box-sizing: border-box; border-radius: 8px; border: 1px solid #3a4658; background: #0e131c; color: inherit; font: inherit; }
+        #results { list-style: none; margin: 4px 0 0; padding: 0; max-height: 220px; overflow-y: auto; }
+        #results:empty { display: none; }
+        #results li { padding: 6px 10px; cursor: pointer; font-size: 14px; }
+        #results li:hover { background: #2a3649; }
+        #details { margin-top: 6px; padding: 10px; font-size: 13px; max-height: calc(100vh - 220px); overflow-y: auto; }
+        #details:empty { display: none; }
+        #details .row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+        #details .row span:first-child { color: #9aa6b8; }
+        #details h3 { margin: 10px 0 4px; font-size: 13px; color: #9cc6ff; }
+        #live-distance { font-size: 15px; font-weight: 600; color: #ffd75e; }
+        .approach { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid rgba(255,255,255,0.06); }
+        .approach small { color: #9aa6b8; }
+
+        #time-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: min(620px, calc(100vw - 20px)); box-sizing: border-box; padding: 10px 14px; z-index: 100; }
+        #clock { font-variant-numeric: tabular-nums; font-size: 16px; text-align: center; margin-bottom: 6px; }
+        #time-controls { display: flex; align-items: center; gap: 8px; }
+        #rate-slider { flex: 1; accent-color: #6aa9ff; }
+        #rate-label { min-width: 120px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
+        #rate-ticks { display: flex; justify-content: space-between; font-size: 11px; color: #6f7b8e; margin: 2px 0 0; padding: 0 64px 0 92px; }
+        #jump-row { display: flex; gap: 6px; justify-content: center; margin-top: 6px; font-size: 12px; align-items: center; color: #9aa6b8; }
+        #jump-row input { background: #0e131c; color: inherit; border: 1px solid #3a4658; border-radius: 6px; padding: 3px 6px; font: inherit; color-scheme: dark; }
+
+        .label { color: #cfd8e6; font-size: 12px; padding: 1px 4px; pointer-events: auto; cursor: pointer; text-shadow: 0 0 3px #000; white-space: nowrap; touch-action: none; }
+        .label:hover { color: #fff; text-decoration: underline; }
+        .label.asteroid { color: #ffd75e; }
+        .label.distance { color: #ffd75e; background: rgba(0,0,0,0.6); border-radius: 4px; cursor: default; }
+        .label.distance:hover { text-decoration: none; }
+        .label.selected { color: #fff; outline: 1px solid #6aa9ff; border-radius: 4px; background: rgba(40, 80, 140, 0.45); }
+
+        #inspect { position: fixed; inset: 0; z-index: 300; background: #05070b; }
+        #inspect-canvas { position: absolute; inset: 0; }
+        #inspect-panel { position: absolute; top: 10px; left: 10px; width: 320px; max-width: calc(100vw - 20px); max-height: calc(100vh - 20px); overflow-y: auto; box-sizing: border-box; padding: 10px; font-size: 13px; }
+        #inspect-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+        #inspect-info .row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+        #inspect-info .row span:first-child { color: #9aa6b8; }
+        #inspect-note { display: block; color: #9aa6b8; margin-top: 8px; font-size: 11px; }
+        #size-compare { margin-top: 8px; }
+        .size-bar { height: 8px; min-width: 2px; border-radius: 2px; margin: 2px 0 6px; background: #6f93c4; }
+        .size-bar.asteroid { background: #ffd75e; }
+        #flybys { padding: 8px 10px; width: 360px; max-width: calc(100vw - 20px); box-sizing: border-box; font-size: 13px; }
+        #flybys-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        #flybys-head select { background: #1d2635; color: inherit; border: 1px solid #3a4658; border-radius: 6px; padding: 2px 4px; font: inherit; }
+        #flybys-note { display: block; color: #9aa6b8; margin: 2px 0 6px; font-size: 11px; }
+        #flybys-list { max-height: min(340px, calc(100vh - 340px)); overflow-y: auto; }
+        #hint { padding: 6px 10px; font-size: 12px; color: #9aa6b8; }
+        #hint b { color: #e8ecf2; font-weight: 600; }
+        #fly-btn { padding: 1px 8px; font-size: 12px; margin-left: 6px; }
+        kbd { background: #1d2635; border: 1px solid #3a4658; border-radius: 4px; padding: 0 5px; font: inherit; font-size: 11px; color: #e8ecf2; }
+
+        #details-toggle { display: none; }
+
+        @media (max-width: 640px) {
+            #flybys-list { max-height: 18vh; }
+            #inspect-panel { top: auto; bottom: 10px; max-height: 42vh; }
+            #search-panel { top: auto; bottom: 150px; left: 10px; right: 10px; width: auto; }
+            #details { max-height: 30vh; }
+            #rate-ticks { display: none; }
+            #details-toggle { display: inline-block; }
+            #details.collapsed > :nth-child(n+3) { display: none; }
+        }
+        
+        @media (hover: none) and (pointer: coarse) {
+            #keys-hint, #g-hint { display: none; }
+        }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+
+<body>
+    <div id="top-left">
+        <div id="info" class="panel">Connecting to database...</div>
+        <div id="focus-bar" class="panel">
+            <span>View:</span>
+            <button data-focus="sun">Sun</button>
+            <button data-focus="earth">Earth</button>
+            <button data-focus="asteroid" disabled>Asteroid</button>
+            <label><input type="checkbox" id="planet-orbits"> Planet orbits</label>
+            <button id="flybys-btn">Upcoming flybys</button>
+        </div>
+        <div id="filter-bar" class="panel">
+            <span>Show:</span>
+            <label><input type="checkbox" id="hazard-only"> Hazardous only</label>
+            <label>Orbit
+                <select id="class-filter">
+                    <option value="">All</option>
+                    <option>Atira</option>
+                    <option>Aten</option>
+                    <option>Apollo</option>
+                    <option>Amor</option>
+                </select>
+            </label>
+            <label>Size
+                <select id="size-filter">
+                    <option value="0,Infinity">All</option>
+                    <option value="0,0.05">Under 50 m</option>
+                    <option value="0.05,0.14">50–140 m</option>
+                    <option value="0.14,1">140 m–1 km</option>
+                    <option value="1,Infinity">Over 1 km</option>
+                </select>
+            </label>
+        </div>
+        <div id="hint" class="panel">
+            <div>Selected: <b id="selection-name">nothing (click a name)</b><span id="g-hint" hidden> — press G to fly there</span> <button id="fly-btn" disabled>Fly there</button></div>
+            <div id="keys-hint"><kbd>G</kbd> fly to selected · <kbd>+</kbd> <kbd>−</kbd> zoom (<kbd>Shift</kbd> faster) · <kbd>L</kbd> faster · <kbd>J</kbd> slower · <kbd>K</kbd> stop</div>
+        </div>
+        <div id="flybys" class="panel" hidden>
+            <div id="flybys-head">
+                <strong id="flybys-title">Upcoming flybys</strong>
+                <label>Next
+                    <select id="flybys-days">
+                        <option value="7">7 days</option>
+                        <option value="30">30 days</option>
+                        <option value="60" selected>60 days</option>
+                    </select>
+                </label>
+            </div>
+            <small id="flybys-note">Within 0.05 AU (19.5 lunar distances) of Earth · JPL CNEOS</small>
+            <div id="flybys-list"></div>
+        </div>
+    </div>
+    <div id="main-container"></div>
+    <div id="labels"></div>
+
+    <div id="search-panel">
+        <input id="search-box" type="text" placeholder="Search any asteroid (e.g. Apophis, Eros)">
+        <ul id="results" class="panel"></ul>
+        <div id="details" class="panel"></div>
+    </div>
+
+    <div id="inspect" hidden>
+        <div id="inspect-canvas"></div>
+        <div id="inspect-panel" class="panel">
+            <div id="inspect-head"><strong id="inspect-name"></strong><button id="inspect-close">Close</button></div>
+            <div id="inspect-info"></div>
+            <div id="size-compare"></div>
+            <small id="inspect-note">Illustration, not this asteroid's real shape. Generated from its ID, so it always looks the same. Drag to rotate, scroll to zoom. Lit from the Sun's real direction.</small>
+        </div>
+    </div>
+
+    <div id="time-bar" class="panel">
+        <div id="clock">—</div>
+        <div id="time-controls">
+            <button id="play-btn" title="Pause / play">❚❚</button>
+            <button id="now-btn" title="Jump to the current time, real-time speed">Now</button>
+            <input id="rate-slider" type="range" min="-10" max="10" step="1" value="1">
+            <span id="rate-label">1 sec / sec</span>
+        </div>
+        <div id="rate-ticks"><span>◀ rewind</span><span>paused</span><span>fast-forward ▶</span></div>
+        <div id="jump-row">
+            Go to (UTC): <input id="jump-input" type="datetime-local" step="1"> <button id="jump-btn">Go</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+        import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+      
+        const API = location.protocol === 'file:' || location.port === '5500' ? 'http://127.0.0.1:8000' : '';
+       
+        const TEX = location.protocol === 'file:' || location.port === '5500' ? `${API}/images/` : 'images/';
+
+        // Units: 1 scene unit = 1 AU. Everything is drawn at true scale.
+        const AU_KM = 149597870.7;
+        const LD_KM = 384400;                 // average Earth–Moon distance
+        const DEG = Math.PI / 180;
+        const GAUSS_K = 0.01720209895;        // rad/day, sets the mean motion of a heliocentric orbit
+        const OBLIQUITY = 23.4393 * DEG;
+        const MOON_MASS_FRACTION = 0.012150;  // Moon / (Earth + Moon)
+
+        const dateToJd = ms => ms / 86400000 + 2440587.5;
+        const jdToDate = jd => new Date((jd - 2440587.5) * 86400000);
+
+        // ---------- Orbit math ----------
+
+        // Heliocentric ecliptic orbit from classical elements (angles in degrees)
+        function buildElem(a, e, iDeg, omDeg, wDeg, maDeg, epoch) {
+            const i = iDeg * DEG, om = omDeg * DEG, w = wDeg * DEG;
+            const cw = Math.cos(w), sw = Math.sin(w), co = Math.cos(om), so = Math.sin(om), ci = Math.cos(i), si = Math.sin(i);
+            return {
+                a, e, epoch,
+                b: a * Math.sqrt(1 - e * e),
+                n: GAUSS_K / Math.pow(a, 1.5),
+                M0: maDeg * DEG,
+                P: [cw * co - sw * so * ci, cw * so + sw * co * ci, sw * si],
+                Q: [-sw * co - cw * so * ci, -sw * so + cw * co * ci, cw * si],
+            };
+        }
+
+        function solveKepler(M, e) {
+            M = M % (2 * Math.PI);
+            let E = e < 0.8 ? M : Math.PI;
+            for (let k = 0; k < 10; k++) {
+                const d = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+                E -= d;
+                if (Math.abs(d) < 1e-12) break;
+            }
+            return E;
+        }
+
+        function elemPos(el, jd, out = [0, 0, 0]) {
+            const E = solveKepler(el.M0 + el.n * (jd - el.epoch), el.e);
+            const xv = el.a * (Math.cos(E) - el.e), yv = el.b * Math.sin(E);
+            out[0] = xv * el.P[0] + yv * el.Q[0];
+            out[1] = xv * el.P[1] + yv * el.Q[1];
+            out[2] = xv * el.P[2] + yv * el.Q[2];
+            return out;
+        }
+
+        function orbitPoints(el, segments = 512) {
+            const pts = new Float32Array((segments + 1) * 3);
+            for (let s = 0; s <= segments; s++) {
+                const E = 2 * Math.PI * s / segments;
+                const xv = el.a * (Math.cos(E) - el.e), yv = el.b * Math.sin(E);
+                writeThree(pts, s, [
+                    xv * el.P[0] + yv * el.Q[0],
+                    xv * el.P[1] + yv * el.Q[1],
+                    xv * el.P[2] + yv * el.Q[2],
+                ]);
+            }
+            return pts;
+        }
+
+       
+        function writeThree(arr, k, v) { arr[3 * k] = v[0]; arr[3 * k + 1] = v[2]; arr[3 * k + 2] = -v[1]; }
+        function setThree(obj, v, origin) { obj.position.set(v[0] - origin[0], v[2] - origin[2], -(v[1] - origin[1])); }
+
+        const PLANETS = {
+            Mercury: { color: 0xb5a89a, radiusKm: 2440,  el: [0.38709927, 0.00000037, 0.20563593, 0.00001906, 7.00497902, -0.00594749, 252.25032350, 149472.67411175, 77.45779628, 0.16047689, 48.33076593, -0.12534081] },
+            Venus:   { color: 0xe8cda2, radiusKm: 6052,  el: [0.72333566, 0.00000390, 0.00677672, -0.00004107, 3.39467605, -0.00078890, 181.97909950, 58517.81538729, 131.60246718, 0.00268329, 76.67984255, -0.27769418] },
+            Earth:   { color: 0x4f8cff, radiusKm: 6371,  el: [1.00000261, 0.00000562, 0.01671123, -0.00004392, -0.00001531, -0.01294668, 100.46457166, 35999.37244981, 102.93768193, 0.32327364, 0, 0] },
+            Mars:    { color: 0xd8673e, radiusKm: 3390,  el: [1.52371034, 0.00001847, 0.09339410, 0.00007882, 1.84969142, -0.00813131, -4.55343205, 19140.30268499, -23.94362959, 0.44441088, 49.55953891, -0.29257343] },
+            Jupiter: { color: 0xd9b48a, radiusKm: 69911, el: [5.20288700, -0.00011607, 0.04838624, -0.00013253, 1.30439695, -0.00183714, 34.39644051, 3034.74612775, 14.72847983, 0.21252668, 100.47390909, 0.20469106] },
+            Saturn:  { color: 0xe6d29a, radiusKm: 58232, el: [9.53667594, -0.00125060, 0.05386179, -0.00050991, 2.48599187, 0.00193609, 49.95424423, 1222.49362201, 92.59887831, -0.41897216, 113.66242448, -0.28867794] },
+            Uranus:  { color: 0x9fd8e0, radiusKm: 25362, el: [19.18916464, -0.00196176, 0.04725744, -0.00004397, 0.77263783, -0.00242939, 313.23810451, 428.48202785, 170.95427630, 0.40805281, 74.01692503, 0.04240589] },
+            Neptune: { color: 0x5577ee, radiusKm: 24622, el: [30.06992276, 0.00026291, 0.00859048, 0.00005105, 1.77004347, 0.00035372, -55.12002969, 218.45945325, 44.96476227, -0.32241464, 131.78422574, -0.02508219] },
+        };
+
+        function planetElem(p, jd) {
+            const T = (jd - 2451545) / 36525, c = p.el;
+            const a = c[0] + c[1] * T, e = c[2] + c[3] * T, I = c[4] + c[5] * T;
+            const L = c[6] + c[7] * T, peri = c[8] + c[9] * T, node = c[10] + c[11] * T;
+            return buildElem(a, e, I, node, peri - node, L - peri, jd);
+        }
+
+        function moonGeo(jd) {
+            const T = (jd - 2451545) / 36525, s = x => Math.sin(x * DEG), c = x => Math.cos(x * DEG);
+            const lon = 218.32 + 481267.881 * T + 6.29 * s(134.9 + 477198.85 * T) - 1.27 * s(259.2 - 413335.38 * T)
+                + 0.66 * s(235.7 + 890534.23 * T) + 0.21 * s(269.9 + 954397.70 * T) - 0.19 * s(357.5 + 35999.05 * T)
+                - 0.11 * s(186.6 + 966404.05 * T);
+            const lat = 5.13 * s(93.3 + 483202.03 * T) + 0.28 * s(228.2 + 960400.87 * T)
+                - 0.28 * s(318.3 + 6003.18 * T) - 0.17 * s(217.6 - 407332.20 * T);
+            const par = 0.9508 + 0.0518 * c(134.9 + 477198.85 * T) + 0.0095 * c(259.2 - 413335.38 * T)
+                + 0.0078 * c(235.7 + 890534.23 * T) + 0.0028 * c(269.9 + 954397.70 * T);
+            const r = (6378.14 / Math.sin(par * DEG)) / AU_KM;
+            return [r * c(lat) * c(lon), r * c(lat) * s(lon), r * s(lat)];
+        }
+
+        const container = document.getElementById('main-container');
+        const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        const labelRenderer = new CSS2DRenderer({ element: document.getElementById('labels') });
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+
+        const scene = new THREE.Scene();
+      
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1e-10, 1e4);
+        camera.position.set(0, 2.2, 3.2);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.enablePan = false;   
+        controls.enableZoom = false;  
+        controls.maxDistance = 200;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+        const sunLight = new THREE.PointLight(0xffffff, 2.6, 0, 0);
+        scene.add(sunLight);
+
+        const dotTex = (() => {
+            const c = document.createElement('canvas'); c.width = c.height = 64;
+            const g = c.getContext('2d');
+            g.beginPath(); g.arc(32, 32, 28, 0, Math.PI * 2); g.fillStyle = '#fff'; g.fill();
+            return new THREE.CanvasTexture(c);
+        })();
+
+        function makeMarker(color, size) {
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+            return new THREE.Points(g, new THREE.PointsMaterial({ color, size, sizeAttenuation: false, map: dotTex, alphaTest: 0.5 }));
+        }
+
+        function makeLabel(text, cls = '', onClick) {
+            const div = document.createElement('div');
+            div.className = 'label ' + cls;
+            div.textContent = text;
+            if (onClick) div.addEventListener('click', onClick);
+            
+            let press = null;
+            div.addEventListener('pointerdown', e => { press = e; });
+            div.addEventListener('pointermove', e => {
+                if (press && Math.hypot(e.clientX - press.clientX, e.clientY - press.clientY) > 4) {
+                    renderer.domElement.dispatchEvent(new PointerEvent('pointerdown', press));
+                    press = null;
+                }
+            });
+            div.addEventListener('pointerup', () => { press = null; });
+            const obj = new CSS2DObject(div);
+            obj.center.set(-0.08, 0.5);
+            return obj;
+        }
+
+        function makeLine(points, color, opacity = 0.6) {
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.BufferAttribute(points, 3));
+            const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
+            line.frustumCulled = false;
+            return line;
+        }
+
+        
+        const stars = (() => {
+            const n = 5000, pos = new Float32Array(n * 3);
+            for (let k = 0; k < n; k++) {
+                const v = new THREE.Vector3().randomDirection().multiplyScalar(1000);
+                pos.set([v.x, v.y, v.z], k * 3);
+            }
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            return new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 1.2, sizeAttenuation: false, transparent: true, opacity: 0.7, depthWrite: false }));
+        })();
+        scene.add(stars);
+
+        const texLoader = new THREE.TextureLoader();
+        const loadTex = name => { const t = texLoader.load(TEX + name); t.colorSpace = THREE.SRGBColorSpace; return t; };
+
+        const bodies = {};
+
+        
+        const sun = { name: 'Sun', pos: [0, 0, 0], radius: 696000 / AU_KM, group: new THREE.Group() };
+        sun.group.add(new THREE.Mesh(new THREE.SphereGeometry(sun.radius, 48, 24), new THREE.MeshBasicMaterial({ color: 0xffe9a8 })));
+        sun.group.add((() => {
+            const c = document.createElement('canvas'); c.width = c.height = 128;
+            const g = c.getContext('2d'), grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+            grad.addColorStop(0, 'rgba(255,240,200,1)'); grad.addColorStop(0.2, 'rgba(255,200,90,0.6)'); grad.addColorStop(1, 'rgba(255,160,40,0)');
+            g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+            const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), sizeAttenuation: false, depthWrite: false, transparent: true }));
+            s.scale.setScalar(0.07);
+            return s;
+        })());
+        sun.label = makeLabel('Sun', '', () => pick(sun));
+        sun.group.add(sun.label);
+        scene.add(sun.group);
+        bodies.sun = sun;
+
+        
+        for (const [name, p] of Object.entries(PLANETS)) {
+            const body = { name, def: p, pos: [0, 0, 0], radius: p.radiusKm / AU_KM, group: new THREE.Group() };
+            body.marker = makeMarker(p.color, 6);
+            body.group.add(body.marker);
+            body.label = makeLabel(name, '', () => pick(body));
+            body.group.add(body.label);
+
+            if (name === 'Earth') {
+                
+                body.tilt = new THREE.Group();
+                body.tilt.rotation.x = -OBLIQUITY;
+                const earthMap = loadTex('earth_atmos_2048.jpg');
+                body.mesh = new THREE.Mesh(
+                    new THREE.SphereGeometry(body.radius, 96, 48),
+                
+                    new THREE.MeshPhongMaterial({ map: earthMap, specular: 0x222222, shininess: 10, emissive: 0xffffff, emissiveMap: earthMap, emissiveIntensity: 0.3 })
+                );
+                body.tilt.add(body.mesh);
+                body.group.add(body.tilt);
+            } else {
+                body.mesh = new THREE.Mesh(new THREE.SphereGeometry(body.radius, 48, 24), new THREE.MeshPhongMaterial({ color: p.color }));
+                body.group.add(body.mesh);
+            }
+            body.orbitLine = makeLine(orbitPoints(planetElem(p, dateToJd(Date.now()))), 0x3ddc84, 0.85);   // green stands out against the red and blue dots
+            body.orbitLine.visible = false;
+            scene.add(body.orbitLine, body.group);
+            bodies[name.toLowerCase()] = body;
+        }
+
+        
+        const moon = { name: 'Moon', pos: [0, 0, 0], geo: [0, 0, 0], radius: 1737.4 / AU_KM, group: new THREE.Group() };
+        moon.marker = makeMarker(0xcccccc, 4);
+        moon.mesh = new THREE.Mesh(new THREE.SphereGeometry(moon.radius, 48, 24), new THREE.MeshPhongMaterial({ map: loadTex('moon_1024.jpg') }));
+        moon.label = makeLabel('Moon', '', () => pick(moon));
+        moon.group.add(moon.marker, moon.mesh, moon.label);
+        scene.add(moon.group);
+        bodies.moon = moon;
+
+    
+        const moonOrbit = makeLine(new Float32Array(3 * 241), 0xaaaaaa, 0.5);
+        moonOrbit.visible = false;
+        moonOrbit.userData.jd = -Infinity;
+        scene.add(moonOrbit);
+
+
+        const swarm = {
+            count: 0, rows: [], el: [], index: new Map(), points: null, refJd: 0,
+            pos: null, posJd: -Infinity,  
+            uniforms: { uDays: { value: 0 }, uOrigin: { value: new THREE.Vector3() }, uHidden: { value: -1 } },
+        };
+
+    
+        let selected = null;
+        const distLine = makeLine(new Float32Array(6), 0xffd75e, 0.8);
+        const distLabel = makeLabel('', 'distance');
+        distLine.visible = false; distLabel.visible = false;
+        scene.add(distLine, distLabel);
+
+    
+
+        const RATES = [
+            [1, '1 sec'], [10, '10 sec'], [60, '1 min'], [600, '10 min'], [3600, '1 hour'],
+            [6 * 3600, '6 hours'], [86400, '1 day'], [7 * 86400, '1 week'], [30 * 86400, '1 month'], [365.25 * 86400, '1 year'],
+        ];
+        const clock = { jd: dateToJd(Date.now()), rate: 1, playing: true, lastStep: 1 };
+        const slider = document.getElementById('rate-slider');
+        const rateLabel = document.getElementById('rate-label');
+        const playBtn = document.getElementById('play-btn');
+
+       
+        function setRateStep(step) {
+            slider.value = step;
+            if (step === 0) {
+                clock.rate = 0;
+                rateLabel.textContent = 'Paused';
+            } else {
+                const [secs, name] = RATES[Math.abs(step) - 1];
+                clock.rate = Math.sign(step) * secs;
+                rateLabel.textContent = (step < 0 ? '−' : '') + name + ' / sec';
+                clock.lastStep = step;
+            }
+            clock.playing = step !== 0;
+            playBtn.textContent = clock.playing ? '❚❚' : '▶';
+        }
+        slider.addEventListener('input', () => setRateStep(+slider.value));
+        playBtn.addEventListener('click', () => setRateStep(clock.playing ? 0 : clock.lastStep));
+        document.getElementById('now-btn').addEventListener('click', () => { clock.jd = dateToJd(Date.now()); setRateStep(1); });
+        document.getElementById('jump-btn').addEventListener('click', () => {
+            const v = document.getElementById('jump-input').value;
+            if (v) clock.jd = dateToJd(new Date(v + 'Z').getTime());
+        });
+        setRateStep(1);
+
+        
+        let focus = sun;
+        let selection = null;
+        let flight = null;
+        const origin = [0, 0, 0];   
+        const focusButtons = document.querySelectorAll('[data-focus]');
+        const selectionName = document.getElementById('selection-name');
+
+       
+        const defaultDistance = target => target === sun ? 4 : Math.max(target.radius * 8, 1e-8);
+
+        function applyFocus(target) {
+            focus = target;
+            controls.minDistance = Math.max(target.radius * 1.15, 1e-9);
+            focusButtons.forEach(b => b.classList.toggle('active',
+                (b.dataset.focus === 'asteroid' && target === selected) || bodies[b.dataset.focus] === target));
+        }
+
+       
+        function setFocus(target, distance) {
+            applyFocus(target);
+            camera.position.setLength(distance ?? defaultDistance(target));
+            controls.update();
+        }
+
+        function select(target) {
+            selection = target;
+            for (const b of [sun, moon, ...Object.keys(PLANETS).map(n => bodies[n.toLowerCase()]), selected].filter(Boolean))
+                b.label.element.classList.toggle('selected', b === target);
+            selectionName.textContent = target ? target.name : 'nothing (click a name)';
+            document.getElementById('g-hint').hidden = !target;
+            flyBtn.disabled = !target;
+        }
+        const flyBtn = document.getElementById('fly-btn');
+        flyBtn.addEventListener('click', () => flyTo(selection));
+
+        function flyTo(target, distance) {
+            if (!target) return;
+            const A = flight ? { pos: origin.slice() } : focus;  
+            const d0 = camera.position.length(), d1 = distance ?? defaultDistance(target);
+            const L = Math.hypot(target.pos[0] - A.pos[0], target.pos[1] - A.pos[1], target.pos[2] - A.pos[2]);
+            const dm = Math.max(d0, d1, L * 1.5);
+            const up = Math.log(dm / d0), down = Math.log(dm / d1);
+            flight = { A, B: target, d0, d1, dm, split: up + down > 1e-6 ? up / (up + down) : 0.5, t: 0, dur: 2.5 };
+            controls.enabled = false;
+            controls.minDistance = 1e-12;
+        }
+
+        
+        function centerOn(target) {
+            if (!target || (target === focus && !flight)) return;
+            const A = flight ? { pos: origin.slice() } : focus;
+            const c = camera.position;   
+            const camHelio = [origin[0] + c.x, origin[1] - c.z, origin[2] + c.y];
+            flight = { center: true, A, B: target, camHelio, t: 0, dur: 0.8 };
+            controls.enabled = false;
+            controls.minDistance = 1e-12;
+        }
+
+
+        function pick(target) {
+            select(target);
+            centerOn(target);
+        }
+
+        const ease = x => x * x * (3 - 2 * x);
+        const logLerp = (a, b, x) => a * Math.pow(b / a, x);
+
+        function updateOrigin(dt) {
+            if (!flight) { origin[0] = focus.pos[0]; origin[1] = focus.pos[1]; origin[2] = focus.pos[2]; return; }
+            const f = flight;
+            f.t = Math.min(f.t + dt / f.dur, 1);
+            if (f.center) {
+                const s = ease(f.t);
+                for (let k = 0; k < 3; k++) origin[k] = f.A.pos[k] + s * (f.B.pos[k] - f.A.pos[k]);
+                camera.position.set(f.camHelio[0] - origin[0], f.camHelio[2] - origin[2], -(f.camHelio[1] - origin[1]));
+                if (f.t >= 1) endFlight(f.B);
+                return;
+            }
+            let d, s;
+            if (f.dm === f.d0 && f.dm === f.d1) {          
+                d = f.d0; s = ease(f.t);
+            } else if (f.t < f.split) {                      
+                d = logLerp(f.d0, f.dm, ease(f.t / f.split));
+                s = f.dm > f.d0 ? f.split * (d - f.d0) / (f.dm - f.d0) : 0;
+            } else {                                 
+            
+                d = logLerp(f.dm, f.d1, f.split < 1 ? ease((f.t - f.split) / (1 - f.split)) : 1);
+                s = f.dm > f.d1 ? 1 - (1 - f.split) * (d - f.d1) / (f.dm - f.d1) : 1;
+            }
+            for (let k = 0; k < 3; k++) origin[k] = f.A.pos[k] + s * (f.B.pos[k] - f.A.pos[k]);
+            camera.position.setLength(d);
+            if (f.t >= 1) endFlight(f.B);
+        }
+
+        function endFlight(target) {
+            flight = null;
+            controls.enabled = true;
+            applyFocus(target);
+        }
+
+        focusButtons.forEach(b => b.addEventListener('click', () => {
+            const target = b.dataset.focus === 'asteroid' ? selected : bodies[b.dataset.focus];
+            if (target) { select(target); flyTo(target); }
+        }));
+
+        const planetOrbitsBox = document.getElementById('planet-orbits');
+        function updateOrbitVisibility() {
+            const all = planetOrbitsBox.checked;
+            for (const name of Object.keys(PLANETS)) bodies[name.toLowerCase()].orbitLine.visible = all;
+            
+            if (selected) bodies.earth.orbitLine.visible = true;
+            moonOrbit.visible = all || !!selected;
+        }
+        planetOrbitsBox.addEventListener('change', updateOrbitVisibility);
+
+    
+
+        const tmp = [0, 0, 0];
+        const camWorld = new THREE.Vector3();
+
+        function updateScene(dt) {
+            const jd = clock.jd;
+
+            for (const name of Object.keys(PLANETS)) {
+                const b = bodies[name.toLowerCase()];
+                elemPos(planetElem(b.def, jd), jd, b.pos);
+            }
+            
+            const earth = bodies.earth, g = moonGeo(jd);
+            for (let k = 0; k < 3; k++) {
+                earth.pos[k] -= g[k] * MOON_MASS_FRACTION;
+                moon.geo[k] = g[k];
+                moon.pos[k] = earth.pos[k] + g[k];
+            }
+            if (selected && !pathPos(selected, jd, selected.pos)) elemPos(selected.el, jd, selected.pos);
+
+    
+            updateOrigin(dt);
+            const o = origin;
+            setThree(sun.group, sun.pos, o);
+            sunLight.position.copy(sun.group.position);
+            for (const name of Object.keys(PLANETS)) {
+                const b = bodies[name.toLowerCase()];
+                setThree(b.group, b.pos, o);
+                b.orbitLine.position.copy(sun.group.position);
+            }
+            setThree(moon.group, moon.pos, o);
+            moon.mesh.lookAt(earth.group.position);  
+
+            
+            earth.mesh.rotation.y = ((280.46061837 + 360.98564736629 * (jd - 2451545)) % 360) * DEG;
+
+            if (moonOrbit.visible) {
+                if (Math.abs(jd - moonOrbit.userData.jd) > 1) {
+                    const arr = moonOrbit.geometry.attributes.position.array;
+                    for (let s = 0; s <= 240; s++) writeThree(arr, s, moonGeo(jd - 14 + s * 28 / 240));
+                    moonOrbit.geometry.attributes.position.needsUpdate = true;
+                    moonOrbit.userData.jd = jd;
+                }
+                moonOrbit.position.copy(earth.group.position);
+            }
+
+            updateSwarm(jd, o);
+
+            if (selected) {
+                setThree(selected.group, selected.pos, o);
+                selected.orbitLine.position.copy(sun.group.position);
+                const d = distLine.geometry.attributes.position.array;
+                d.set([earth.group.position.x, earth.group.position.y, earth.group.position.z,
+                       selected.group.position.x, selected.group.position.y, selected.group.position.z]);
+                distLine.geometry.attributes.position.needsUpdate = true;
+                distLabel.position.lerpVectors(earth.group.position, selected.group.position, 0.5);
+            }
+
+
+            camWorld.copy(camera.position);
+            for (const b of [...Object.keys(PLANETS).map(n => bodies[n.toLowerCase()]), moon, selected].filter(Boolean)) {
+                const dist = camWorld.distanceTo(b.group.position);
+                b.marker.visible = dist > b.radius * 400;
+            }
+        
+            moon.label.visible = camWorld.distanceTo(earth.group.position) < 0.03;
+
+            stars.position.copy(camera.position);
+        }
+
+
+        const clockEl = document.getElementById('clock');
+        let lastReadout = 0;
+        function earthDistanceKm() {
+            const e = bodies.earth.pos, s = selected.pos;
+            return Math.hypot(s[0] - e[0], s[1] - e[1], s[2] - e[2]) * AU_KM;
+        }
+        function fmtKm(km) {
+            return km >= 1e7 ? `${(km / AU_KM).toFixed(3)} AU` : `${Math.round(km).toLocaleString()} km`;
+        }
+        function updateReadouts(now) {
+            if (now - lastReadout < 100) return;
+            lastReadout = now;
+            clockEl.textContent = jdToDate(clock.jd).toISOString().replace('T', '  ').slice(0, 20) + ' UTC';
+            if (selected) {
+                const km = earthDistanceKm();
+                const text = `${fmtKm(km)}  ·  ${(km / LD_KM).toFixed(2)} LD` + (selected.onPath ? '  ·  JPL exact' : '');
+                distLabel.element.textContent = text;
+                const live = document.getElementById('live-distance');
+                if (live) live.textContent = text;
+            }
+        }
+
+        const held = new Set();
+        window.addEventListener('keyup', e => held.delete(e.code));
+        window.addEventListener('blur', () => held.clear());
+
+    
+        window.addEventListener('keydown', e => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.ctrlKey || e.metaKey || e.altKey) return;
+            held.add(e.code);
+            if (e.repeat) return;
+            switch (e.code) {
+                case 'KeyG': flyTo(selection); break;
+                case 'KeyL': setRateStep(Math.min(+slider.value + 1, 10)); break;   
+                case 'KeyJ': setRateStep(Math.max(+slider.value - 1, -10)); break; 
+                case 'KeyK': setRateStep(0); break;                                
+            }
+        });
+
+        
+        window.addEventListener('wheel', e => {
+            if (e.target.closest('.panel, #search-panel, #inspect')) return;   
+            e.preventDefault();
+            if (flight) return;
+            const px = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;  
+            const sensitivity = e.ctrlKey ? 0.01 : 0.0025;              
+            const step = THREE.MathUtils.clamp(px * sensitivity, -0.7, 0.7); 
+            camera.position.setLength(THREE.MathUtils.clamp(
+                camera.position.length() * Math.exp(step), controls.minDistance, controls.maxDistance));
+        }, { passive: false });
+
+        
+        let pinchGap = 0;
+        const fingerGap = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+        window.addEventListener('touchstart', e => {
+            pinchGap = e.touches.length === 2 && !e.target.closest('.panel, #search-panel, #inspect') ? fingerGap(e.touches) : 0;
+        }, { passive: true });
+        window.addEventListener('touchmove', e => {
+            if (e.touches.length !== 2 || !pinchGap) return;
+            e.preventDefault();   
+            const gap = fingerGap(e.touches);
+            if (!flight && gap > 0) camera.position.setLength(THREE.MathUtils.clamp(
+                camera.position.length() * pinchGap / gap, controls.minDistance, controls.maxDistance));
+            pinchGap = gap;
+        }, { passive: false });
+        window.addEventListener('touchend', e => { if (e.touches.length < 2) pinchGap = 0; });
+
+        
+        function handleZoomKeys(dt) {
+            if (flight) return;
+            const has = (...codes) => codes.some(c => held.has(c));
+            const dir = (has('Equal', 'NumpadAdd', 'PageUp') ? -1 : 0) + (has('Minus', 'NumpadSubtract', 'PageDown') ? 1 : 0);
+            if (!dir) return;
+            const speed = has('ShiftLeft', 'ShiftRight') ? 3.6 : 1.2;  
+            camera.position.setLength(THREE.MathUtils.clamp(
+                camera.position.length() * Math.exp(dir * speed * dt), controls.minDistance, controls.maxDistance));
+        }
+
+        let lastFrame = performance.now();
+        function animate(now) {
+            requestAnimationFrame(animate);
+            const dt = Math.min((now - lastFrame) / 1000, 0.25);
+            lastFrame = now;
+            if (clock.playing) clock.jd += clock.rate * dt / 86400;
+            handleZoomKeys(dt);
+            updateScene(dt);
+            controls.update();
+            if (inspect.open) {
+                renderInspect(dt);  
+            } else {
+                renderer.render(scene, camera);
+                labelRenderer.render(scene, camera);
+            }
+            updateReadouts(now);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        setFocus(sun, 4);
+        requestAnimationFrame(animate);     
+
+        const info = document.getElementById('info');
+        const elemFromRow = r => buildElem(+r.a_au, +r.e, +r.i_deg, +r.om_deg, +r.w_deg, +r.ma_deg, +r.epoch_jd);
+
+        
+        const sizeKm = r => r.diameter_km ?? (r.h_mag == null ? null : (1329 / Math.sqrt(r.albedo ?? 0.14)) * Math.pow(10, -r.h_mag / 5));
+
+        
+        function orbitClass(r) {
+            const a = +r.a_au, q = a * (1 - r.e), Q = a * (1 + r.e);
+            if (Q < 0.983) return 'Atira';
+            if (a < 1) return 'Aten';
+            if (q < 1.017) return 'Apollo';
+            return q < 1.3 ? 'Amor' : 'Other';
+        }
+
+
+        function makeSwarm(rows) {
+            rows.sort((a, b) => a.pha - b.pha);  
+            const n = rows.length;
+            const P = new Float32Array(n * 3), Q = new Float32Array(n * 3), orbit = new Float32Array(n * 4);
+            const colors = new Float32Array(n * 3), hazard = new Float32Array(n);
+            const red = new THREE.Color(0xff4040), blue = new THREE.Color(0x6f93c4);
+            for (const r of rows) { r.size = sizeKm(r); r.cls = orbitClass(r); }
+            swarm.rows = rows;
+            swarm.count = n;
+            swarm.el = rows.map(elemFromRow);
+            swarm.index = new Map(rows.map((r, k) => [r.spk_id, k]));
+            swarm.pos = new Float64Array(n * 3);
+            swarm.el.forEach((el, k) => {
+                P.set(el.P, 3 * k);
+                Q.set(el.Q, 3 * k);
+                orbit.set([el.a, el.e, el.b, el.n], 4 * k);
+                (rows[k].pha ? red : blue).toArray(colors, 3 * k);
+                hazard[k] = rows[k].pha ? 1 : 0;
+            });
+
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));  
+            g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            g.setAttribute('aP', new THREE.BufferAttribute(P, 3));
+            g.setAttribute('aQ', new THREE.BufferAttribute(Q, 3));
+            g.setAttribute('aOrbit', new THREE.BufferAttribute(orbit, 4));
+            g.setAttribute('aM', new THREE.BufferAttribute(new Float32Array(n), 1));
+            g.setAttribute('aHazard', new THREE.BufferAttribute(hazard, 1));
+            g.setAttribute('aShow', new THREE.BufferAttribute(new Float32Array(n).fill(1), 1));
+
+            const material = new THREE.PointsMaterial({ size: 3, sizeAttenuation: false, map: dotTex, alphaTest: 0.5, vertexColors: true, depthWrite: false });
+            material.onBeforeCompile = shader => {
+                Object.assign(shader.uniforms, swarm.uniforms);
+                shader.vertexShader = `
+                    attribute vec3 aP;
+                    attribute vec3 aQ;
+                    attribute vec4 aOrbit;   // a, e, b, mean motion
+                    attribute float aM;      // mean anomaly at swarm.refJd
+                    attribute float aHazard;
+                    attribute float aShow;   // 0 = removed by the filters
+                    uniform float uDays;     // days since swarm.refJd
+                    uniform vec3 uOrigin;
+                    uniform int uHidden;
+                ` + shader.vertexShader
+                    .replace('#include <begin_vertex>', `
+                        float M = mod(aM + aOrbit.w * uDays, 6.283185307);
+                        float E = aOrbit.y < 0.8 ? M : 3.141592654;
+                        for (int k = 0; k < 10; k++) E -= (E - aOrbit.y * sin(E) - M) / (1.0 - aOrbit.y * cos(E));
+                        vec3 h = aOrbit.x * (cos(E) - aOrbit.y) * aP + aOrbit.z * sin(E) * aQ - uOrigin;
+                        vec3 transformed = vec3(h.x, h.z, -h.y);
+                    `)
+                    .replace('gl_PointSize = size;', `
+                        gl_PointSize = size * (aHazard > 0.5 ? 1.0 : 0.6);
+                        // Outside the clip volume = not drawn
+                        if (gl_VertexID == uHidden || aShow < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+                    `);
+            };
+
+            swarm.points = new THREE.Points(g, material);
+            swarm.points.frustumCulled = false;
+            swarm.points.renderOrder = 1;   
+            hideSelectedDot();
+            rebaseSwarm(clock.jd);
+            scene.add(swarm.points);
+        }
+
+    
+        function rebaseSwarm(jd) {
+            const attr = swarm.points.geometry.attributes.aM;
+            for (let k = 0; k < swarm.count; k++) {
+                const el = swarm.el[k];
+                attr.array[k] = (el.M0 + el.n * (jd - el.epoch)) % (2 * Math.PI);
+            }
+            attr.needsUpdate = true;
+            swarm.refJd = jd;
+        }
+
+        function updateSwarm(jd, o) {
+            if (!swarm.points) return;
+            if (Math.abs(jd - swarm.refJd) > 30) rebaseSwarm(jd);
+            swarm.uniforms.uDays.value = jd - swarm.refJd;
+            swarm.uniforms.uOrigin.value.set(o[0], o[1], o[2]);
+        }
+
+    
+        function hideSelectedDot() {
+            swarm.uniforms.uHidden.value = swarm.index.get(selected?.spk_id) ?? -1;
+        }
+
+        
+        const hazardBox = document.getElementById('hazard-only'), classFilter = document.getElementById('class-filter'), sizeFilter = document.getElementById('size-filter');
+        function applyFilters() {
+            if (!swarm.points) return;
+            const [minKm, maxKm] = sizeFilter.value.split(',').map(Number);
+            const anySize = sizeFilter.selectedIndex === 0;
+            const attr = swarm.points.geometry.attributes.aShow;
+            let shown = 0;
+            swarm.rows.forEach((r, k) => {
+                const show = (!hazardBox.checked || r.pha) && (!classFilter.value || r.cls === classFilter.value)
+                    && (anySize || (r.size != null && r.size >= minKm && r.size < maxKm));
+                attr.array[k] = show ? 1 : 0;
+                if (show) shown++;
+            });
+            attr.needsUpdate = true;
+            info.innerText = shown === swarm.count
+                ? `Tracking ${shown.toLocaleString()} asteroids`
+                : `Showing ${shown.toLocaleString()} of ${swarm.count.toLocaleString()} asteroids`;
+        }
+        for (const el of [hazardBox, classFilter, sizeFilter]) el.addEventListener('change', applyFilters);
+
+    
+        async function loadSwarm() {
+            try {
+                info.innerText = 'Fetching asteroids...';
+                const res = await fetch(`${API}/all-asteroids`);
+                makeSwarm((await res.json()).filter(a => a.e < 1 && a.a_au > 0));
+                applyFilters();
+            } catch (error) {
+                info.innerText = 'Error connecting to backend. Is main.py running? Retrying...';
+                console.error(error);
+                setTimeout(loadSwarm, 5000);
+            }
+        }
+        loadSwarm();
+
+        
+        const viewProj = new THREE.Matrix4();
+        function dotNear(clientX, clientY) {
+            if (!swarm.points) return -1;
+            const rect = renderer.domElement.getBoundingClientRect();
+            const pos = swarm.pos, o = origin, shown = swarm.points.geometry.attributes.aShow.array;
+            
+            if (Math.abs(clock.jd - swarm.posJd) > 0.001) {
+                for (let k = 0; k < swarm.count; k++) {
+                    elemPos(swarm.el[k], clock.jd, tmp);
+                    pos[3 * k] = tmp[0]; pos[3 * k + 1] = tmp[1]; pos[3 * k + 2] = tmp[2];
+                }
+                swarm.posJd = clock.jd;
+            }
+        
+            const m = viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).elements;
+            const hidden = swarm.uniforms.uHidden.value;
+            let best = -1, bestDist = 8;
+            for (let k = 0; k < swarm.count; k++) {
+                if (k === hidden || !shown[k]) continue;
+                const x = pos[3 * k] - o[0], y = pos[3 * k + 2] - o[2], z = -(pos[3 * k + 1] - o[1]);
+                const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+                if (w <= 0) continue;   
+                const d = Math.hypot(rect.left + ((m[0] * x + m[4] * y + m[8] * z + m[12]) / w + 1) / 2 * rect.width - clientX,
+                                     rect.top + (1 - (m[1] * x + m[5] * y + m[9] * z + m[13]) / w) / 2 * rect.height - clientY);
+                if (d < bestDist) { best = k; bestDist = d; }
+            }
+            return best;
+        }
+
+    
+        const tip = document.createElement('div');
+        tip.className = 'label';
+        tip.style.cssText = 'position:absolute;pointer-events:none;display:none;z-index:150;background:rgba(0,0,0,0.7);border-radius:4px';
+        document.body.appendChild(tip);
+        let hoverEvent = null;
+        renderer.domElement.addEventListener('pointermove', e => {
+            if (e.buttons) return;   
+            if (!hoverEvent) setTimeout(() => {   
+                const h = hoverEvent;
+                hoverEvent = null;
+                if (!h) return;
+            
+                const k = Math.abs(clock.rate) < 86400 ? dotNear(h.clientX, h.clientY) : -1;
+                renderer.domElement.style.cursor = k >= 0 ? 'pointer' : '';
+                tip.style.display = k >= 0 ? 'block' : 'none';
+                if (k >= 0) {
+                    tip.textContent = swarm.rows[k].name;
+                    tip.style.left = `${h.clientX + 12}px`;
+                    tip.style.top = `${h.clientY - 8}px`;
+                }
+            }, 100);
+            hoverEvent = e;
+        });
+        renderer.domElement.addEventListener('pointerleave', () => { hoverEvent = null; tip.style.display = 'none'; });
+
+    
+        let downAt = null;
+        renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+        renderer.domElement.addEventListener('pointerup', async e => {
+            if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+            downAt = null;
+            const k = dotNear(e.clientX, e.clientY);
+            if (k < 0) return;
+            try {
+                const res = await fetch(`${API}/asteroid/${swarm.rows[k].spk_id}`);
+                if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
+                showAsteroid(await res.json());
+            } catch (err) {
+                console.error(err);
+            }
+        });
+
+
+
+        const box = document.getElementById('search-box');
+        const results = document.getElementById('results');
+        const details = document.getElementById('details');
+        let timer;
+
+        box.addEventListener('input', () => {
+            clearTimeout(timer);
+            const q = box.value.trim();
+            if (q.length < 2) { results.innerHTML = ''; return; }
+        
+            timer = setTimeout(async () => {
+                let matches;
+                try {
+                    const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
+                    if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
+                    matches = await res.json();
+                } catch (err) {
+                    console.error(err);
+                    results.innerHTML = '<li></li>';
+                    results.firstChild.textContent = 'Search unavailable — is main.py running?';
+                    return;
+                }
+                results.innerHTML = '';
+                if (!matches.length) {
+                    results.innerHTML = '<li></li>';
+                    results.firstChild.textContent = 'No asteroids match that name';
+                }
+                matches.forEach(ast => {
+                    const li = document.createElement('li');
+                    li.textContent = ast.full_name + (ast.pha ? '  ⚠' : '');
+                    li.onclick = () => showAsteroid(ast);
+                    results.appendChild(li);
+                });
+            }, 300);
+        });
+
+        function clearSelection() {
+            if (!selected) return;
+            if (focus === selected || flight?.B === selected) flyTo(sun, 4);
+            if (selection === selected) select(null);
+            selected.group.remove(selected.label);   
+            scene.remove(selected.group, selected.orbitLine);
+            selected.orbitLine.geometry.dispose();
+            selected = null;
+            hideSelectedDot();
+            distLine.visible = distLabel.visible = false;
+            document.querySelector('[data-focus="asteroid"]').disabled = true;
+            details.innerHTML = '';
+            box.value = '';
+            updateOrbitVisibility();
+        }
+
+        function showAsteroid(ast) {
+            results.innerHTML = '';
+            box.value = ast.full_name;
+            clearSelection();
+            box.value = ast.full_name;
+            if (!(ast.e < 1)) { details.textContent = 'This object is on an open (hyperbolic) orbit and cannot be drawn.'; return; }
+
+            const diameterKm = sizeKm(ast);
+            const el = elemFromRow(ast);
+            selected = { spk_id: ast.spk_id, name: ast.full_name, pdes: ast.pdes, el, pos: [0, 0, 0], radius: (diameterKm || 0.1) / 2 / AU_KM, group: new THREE.Group() };
+            selected.marker = makeMarker(0xffd75e, 8);
+            selected.label = makeLabel(ast.full_name, 'asteroid', () => pick(selected));
+            selected.group.add(selected.marker,
+                new THREE.Mesh(new THREE.IcosahedronGeometry(selected.radius, 2), new THREE.MeshPhongMaterial({ color: 0x9a8f80, flatShading: true })),
+                selected.label);
+            selected.orbitLine = makeLine(orbitPoints(el), 0xffd75e, 0.85);
+            scene.add(selected.group, selected.orbitLine);
+            distLine.visible = distLabel.visible = true;
+            document.querySelector('[data-focus="asteroid"]').disabled = false;
+            updateOrbitVisibility();
+            elemPos(el, clock.jd, selected.pos);
+            hideSelectedDot();
+            pick(selected);    
+
+            renderDetails(ast, diameterKm);
+            loadApproaches(ast.pdes);
+        }
+
+        function row(parent, label, value) {
+            const r = document.createElement('div');
+            r.className = 'row';
+            const a = document.createElement('span'), b = document.createElement('span');
+            a.textContent = label; b.textContent = value;
+            r.append(a, b);
+            parent.appendChild(r);
+            return b;
+        }
+
+        function renderDetails(ast, diameterKm) {
+            const fmt = (v, unit = '') => v == null ? 'unknown' : `${(+v).toFixed(3)}${unit}`;
+            details.innerHTML = '';
+            const title = document.createElement('div');
+            title.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px';
+            const name = document.createElement('strong'); name.textContent = ast.full_name;
+            const clear = document.createElement('button'); clear.textContent = 'Clear'; clear.onclick = clearSelection;
+    
+            const toggle = document.createElement('button'); toggle.id = 'details-toggle';
+            const setFolded = folded => { details.classList.toggle('collapsed', folded); toggle.textContent = folded ? 'More ▴' : 'Less ▾'; };
+            toggle.onclick = () => setFolded(!details.classList.contains('collapsed'));
+            setFolded(true);
+            const inspectBtn = document.createElement('button'); inspectBtn.textContent = 'Inspect'; inspectBtn.onclick = () => openInspect(ast, diameterKm);
+            const buttons = document.createElement('span'); buttons.style.cssText = 'display:flex;gap:6px;flex-shrink:0';
+            buttons.append(inspectBtn, toggle, clear);
+            title.append(name, buttons);
+            details.appendChild(title);
+
+            row(details, 'Distance from Earth', '').id = 'live-distance';
+            [
+                ['Diameter', ast.diameter_km != null ? fmt(ast.diameter_km, ' km') : `~${fmt(diameterKm, ' km')} (est.)`],
+                ['Closest orbit to Earth (MOID)', fmt(ast.moid, ' AU')],
+                ['Absolute magnitude (H)', fmt(ast.h_mag)],
+                ['Rotation period', fmt(ast.rot_per, ' h')],
+                ['Orbit class', orbitClass(ast)],
+                ['Orbit period', fmt(Math.pow(ast.a_au, 1.5), ' years')],
+                ['Semi-major axis', fmt(ast.a_au, ' AU')],
+                ['Eccentricity', fmt(ast.e)],
+                ['Inclination', fmt(ast.i_deg, '°')],
+            ].forEach(([l, v]) => row(details, l, v));
+
+            const h = document.createElement('h3'); h.textContent = 'Close approaches to Earth (JPL)';
+            const list = document.createElement('div'); list.id = 'approaches'; list.textContent = 'Loading...';
+            details.append(h, list);
+        }
+
+        async function loadApproaches(des) {
+            const forName = selected?.name;
+            let rows;
+            try {
+                const res = await fetch(`${API}/close-approaches?des=${encodeURIComponent(des)}`);
+                if (!res.ok) throw new Error(res.status);
+                rows = await res.json();
+            } catch (err) {
+                console.error(err);
+                rows = null;
+            }
+            const list = document.getElementById('approaches');
+            if (!list || selected?.name !== forName) return;
+            list.innerHTML = '';
+            if (!rows) { list.textContent = 'Could not reach JPL (check main.py is running).'; return; }
+            if (!rows.length) { list.textContent = 'None within 0.2 AU between 1950 and 2150.'; return; }
+
+
+            const nowJd = dateToJd(Date.now());
+            const next = rows.findIndex(r => +r.jd >= nowJd);
+            const start = Math.max(0, (next === -1 ? rows.length : next) - 2);
+            rows.slice(start, start + 6).forEach(r => {
+                const km = +r.dist * AU_KM;
+                const item = document.createElement('div');
+                item.className = 'approach';
+                const text = document.createElement('div');
+                text.innerHTML = '<div></div><small></small>';
+                text.children[0].textContent = r.cd + (+r.jd < nowJd ? '  (past)' : '');
+                text.children[1].textContent = `${fmtKm(km)} · ${(km / LD_KM).toFixed(2)} LD · ${(+r.v_rel).toFixed(1)} km/s`;
+                const go = document.createElement('button');
+                go.textContent = 'Watch';
+                go.title = 'Jump to one day before closest approach, view from Earth at 1 hour/sec';
+                go.onclick = () => {
+                    watchApproach(+r.jd, +r.dist);
+                    document.getElementById('details-toggle')?.click();  
+                };
+                item.append(text, go);
+                list.appendChild(item);
+            });
+        }
+
+
+        function watchApproach(jd, distAu) {
+            clock.jd = jd - 1;
+            setRateStep(5);   
+            flyTo(bodies.earth, Math.min(Math.max(distAu * 3, 0.0004), 0.05));
+            loadPath(selected, jd);
+        }
+
+    
+
+    
+        function seededRandom(seed) {
+            let s = seed >>> 0;
+            return () => {
+                s = (s + 0x6D2B79F5) >>> 0;
+                let t = Math.imul(s ^ (s >>> 15), 1 | s);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+
+    
+        function makeNoise(random) {
+            const p = Array.from({ length: 256 }, (_, k) => k);
+            for (let k = 255; k > 0; k--) { const j = Math.floor(random() * (k + 1)); [p[k], p[j]] = [p[j], p[k]]; }
+            const perm = Uint8Array.from([...p, ...p]);
+            const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+            const lerp = (a, b, t) => a + t * (b - a);
+            const grad = (h, x, y, z) => {
+                h &= 15;
+                const u = h < 8 ? x : y, v = h < 4 ? y : h === 12 || h === 14 ? x : z;
+                return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+            };
+            const noise = (x, y, z) => {
+                const X = Math.floor(x), Y = Math.floor(y), Z = Math.floor(z);
+                x -= X; y -= Y; z -= Z;
+                const A = perm[X & 255] + (Y & 255), B = perm[(X + 1) & 255] + (Y & 255);
+                const AA = perm[A] + (Z & 255), AB = perm[A + 1] + (Z & 255), BA = perm[B] + (Z & 255), BB = perm[B + 1] + (Z & 255);
+                const u = fade(x), v = fade(y), w = fade(z);
+                return lerp(
+                    lerp(lerp(grad(perm[AA], x, y, z), grad(perm[BA], x - 1, y, z), u),
+                         lerp(grad(perm[AB], x, y - 1, z), grad(perm[BB], x - 1, y - 1, z), u), v),
+                    lerp(lerp(grad(perm[AA + 1], x, y, z - 1), grad(perm[BA + 1], x - 1, y, z - 1), u),
+                         lerp(grad(perm[AB + 1], x, y - 1, z - 1), grad(perm[BB + 1], x - 1, y - 1, z - 1), u), v), w);
+            };
+            return (x, y, z, freq, octaves) => {
+                let sum = 0, amp = 1;
+                for (let o = 0; o < octaves; o++) { sum += amp * noise(x * freq, y * freq, z * freq); amp *= 0.5; freq *= 2; }
+                return sum;
+            };
+        }
+
+    
+        let baseSphere = null;
+        function getBaseSphere() {
+            if (!baseSphere) {
+                const ico = new THREE.IcosahedronGeometry(1, 40);
+                ico.deleteAttribute('normal');
+                ico.deleteAttribute('uv');
+                baseSphere = mergeVertices(ico);
+                ico.dispose();
+            }
+            return baseSphere;
+        }
+
+        function makeAsteroidGeometry(spkId) {
+            const random = seededRandom(spkId);
+            for (let k = 0; k < 8; k++) random();  
+            const fbm = makeNoise(random);
+            const axisY = 0.6 + 0.35 * random(), axisZ = 0.4 + 0.45 * random() * axisY + 0.1;
+            const lumps = 0.16 + 0.2 * random();
+            const neck = random() < 0.2 ? 0.25 + 0.35 * random() : 0;  
+            const craters = Array.from({ length: 40 + Math.floor(random() * 50) }, () => {
+                const z = 2 * random() - 1, a = 2 * Math.PI * random(), s = Math.sqrt(1 - z * z);
+                const radius = 0.05 + 0.32 * Math.pow(random(), 3);  
+                return { x: s * Math.cos(a), y: s * Math.sin(a), z, radius, depth: radius * 0.42, rim: radius * 0.11 };
+            });
+
+            const geometry = getBaseSphere().clone();
+            const pos = geometry.attributes.position, n = pos.count;
+            const tones = new Float32Array(n * 3);
+            let maxLength = 0;
+            for (let v = 0; v < n; v++) {
+                const len = Math.hypot(pos.getX(v), pos.getY(v), pos.getZ(v));
+                const x = pos.getX(v) / len, y = pos.getY(v) / len, z = pos.getZ(v) / len;
+                let r = 1 + lumps * fbm(x, y, z, 1.2, 2) + 0.03 * fbm(x + 5, y, z, 4, 2) + 0.008 * fbm(x, y + 9, z, 13, 2);
+                let shade = 0;
+                for (const c of craters) {
+                    const dot = x * c.x + y * c.y + z * c.z;
+                    if (dot < 0.5) continue;
+                    const t = Math.acos(Math.min(dot, 1)) / c.radius;
+                
+                    if (t < 1) { r += c.depth * (t * t - 1) + c.rim * t * t * t * t; shade += 0.14 * (1 - t); }
+                    else if (t < 1.6) { const f = (1.6 - t) / 0.6; r += c.rim * f * f; }
+                }
+                const waist = neck ? 1 - neck * Math.exp(-(x * x) / 0.08) : 1;
+                const px = x * r, py = y * r * axisY * waist, pz = z * r * axisZ * waist;
+                pos.setXYZ(v, px, py, pz);
+                maxLength = Math.max(maxLength, Math.hypot(px, py, pz));
+                const tone = Math.max(0.55, 0.9 + 0.14 * fbm(x, y, z + 3, 6, 3) - shade);
+                tones.set([tone, tone, tone], v * 3);
+            }
+            geometry.scale(1 / maxLength, 1 / maxLength, 1 / maxLength);
+            geometry.setAttribute('color', new THREE.BufferAttribute(tones, 3));
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+
+
+        const inspect = { open: false, ast: null, spinPerSec: 0, renderer: null, scene: null, camera: null, controls: null, light: null, mesh: null };
+        const inspectEl = document.getElementById('inspect');
+        const SIZE_REFERENCES = [
+            ['a city bus', 0.012], ['a football pitch', 0.105], ['the Eiffel Tower', 0.33], ['the Burj Khalifa', 0.828],
+            ['the Golden Gate Bridge', 2.7], ['Central Park', 4], ['the height of Everest', 8.85], ['Manhattan', 21.6],
+        ];
+
+        
+        function asteroidLook(specType) {
+            const letter = (specType || '?')[0].toUpperCase();
+            if ('CBFGDTP'.includes(letter)) return { color: 0x57514a, roughness: 0.95, metalness: 0, name: 'dark, carbon-rich' };
+            if ('SQARKLVO'.includes(letter)) return { color: 0x9c8a72, roughness: 0.85, metalness: 0, name: 'grey-brown, stony' };
+            if ('MXE'.includes(letter)) return { color: 0x98948c, roughness: 0.5, metalness: 0.55, name: 'metallic' };
+            return { color: 0x85807a, roughness: 0.9, metalness: 0, name: null };
+        }
+
+        const fmtSize = km => km >= 1 ? `${km.toFixed(km < 10 ? 2 : 1)} km` : `${Math.round(km * 1000)} m`;
+
+        function setupInspect() {
+            inspect.renderer = new THREE.WebGLRenderer({ antialias: true });
+            inspect.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.getElementById('inspect-canvas').appendChild(inspect.renderer.domElement);
+            inspect.scene = new THREE.Scene();
+            inspect.camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
+            inspect.controls = new OrbitControls(inspect.camera, inspect.renderer.domElement);
+            inspect.controls.enableDamping = true;
+            inspect.controls.enablePan = false;
+            inspect.controls.minDistance = 1.25;
+            inspect.controls.maxDistance = 8;
+            inspect.light = new THREE.DirectionalLight(0xffffff, 3.2);
+            inspect.scene.add(inspect.light, new THREE.AmbientLight(0xffffff, 0.22));
+            inspect.tilt = new THREE.Group();
+            inspect.scene.add(inspect.tilt);
+        }
+
+        function sizeInspect() {
+            const w = window.innerWidth, h = window.innerHeight;
+            inspect.camera.aspect = w / h;
+            
+            if (w <= 640) inspect.camera.setViewOffset(w, h, 0, h * 0.2, w, h);
+            else inspect.camera.clearViewOffset();
+            inspect.camera.updateProjectionMatrix();
+            inspect.renderer.setSize(w, h);
+        }
+
+    
+        function sunDirection() {
+            const s = selected?.pos ?? [1, 0, 0];
+            return new THREE.Vector3(-s[0], -s[2], s[1]).normalize();
+        }
+
+        function openInspect(ast, diameterKm) {
+            if (!inspect.renderer) setupInspect();
+            sizeInspect();
+            if (inspect.mesh) {
+                inspect.tilt.remove(inspect.mesh);
+                inspect.mesh.geometry.dispose();
+                inspect.mesh.material.dispose();
+            }
+            const look = asteroidLook(ast.spec_type);
+            inspect.mesh = new THREE.Mesh(makeAsteroidGeometry(ast.spk_id), new THREE.MeshStandardMaterial({
+                color: look.color, roughness: look.roughness, metalness: look.metalness, vertexColors: true,
+            }));
+            inspect.tilt.add(inspect.mesh);
+            
+            const random = seededRandom(ast.spk_id + 1);
+            inspect.tilt.rotation.set(-Math.PI / 2 + (random() - 0.5) * 0.9, 0, (random() - 0.5) * 0.9);
+
+        
+            const hours = ast.rot_per;
+            const shownSeconds = hours ? THREE.MathUtils.clamp(hours * 3.6, 6, 60) : 30;
+            inspect.spinPerSec = 2 * Math.PI / shownSeconds;
+
+            
+            const start = sunDirection().applyAxisAngle(new THREE.Vector3(0, 1, 0), 0.7);
+            start.y += 0.35;
+            
+            inspect.camera.position.copy(start.setLength(3.1 / Math.min(1, inspect.camera.aspect * 1.25)));
+            inspect.controls.target.set(0, 0, 0);
+            inspect.controls.update();
+
+            document.getElementById('inspect-name').textContent = ast.full_name;
+            const info = document.getElementById('inspect-info');
+            info.innerHTML = '';
+            row(info, 'Diameter', diameterKm == null ? 'unknown' : fmtSize(diameterKm) + (ast.diameter_km != null ? '' : ' (est.)'));
+            row(info, 'Spectral type', ast.spec_type ? `${ast.spec_type}${look.name ? ` (${look.name})` : ''}` : 'unknown, so a generic colour');
+            row(info, 'Real rotation', hours ? `${(+hours).toFixed(2)} hours` : 'unknown');
+            row(info, 'Spin shown', hours ? `${Math.round(hours * 3600 / shownSeconds).toLocaleString()}× faster` : 'made up');
+            renderSizeCompare(diameterKm);
+
+            inspect.ast = ast;
+            inspect.open = true;
+            inspectEl.hidden = false;
+        }
+
+        function renderSizeCompare(km) {
+            const box = document.getElementById('size-compare');
+            box.innerHTML = '';
+            if (km == null) return;
+            
+            const [refName, refKm] = SIZE_REFERENCES.reduce((best, r) => Math.abs(Math.log(km / r[1])) < Math.abs(Math.log(km / best[1])) ? r : best);
+            const ratio = km / refKm, longest = Math.max(km, refKm);
+            const text = document.createElement('div');
+            text.textContent = `About ${ratio.toFixed(ratio < 10 ? 1 : 0)} × ${refName}`;
+            const bar = (cls, value, label) => {
+                const name = document.createElement('small'), b = document.createElement('div');
+                name.textContent = label;
+                b.className = 'size-bar' + cls;
+                b.style.width = `${100 * value / longest}%`;
+                box.append(name, b);
+            };
+            box.appendChild(text);
+            bar(' asteroid', km, `This asteroid: ${fmtSize(km)}`);
+            bar('', refKm, `${refName[0].toUpperCase()}${refName.slice(1)}: ${fmtSize(refKm)}`);
+        }
+
+        function renderInspect(dt) {
+            inspect.mesh.rotation.z += inspect.spinPerSec * dt;
+            inspect.light.position.copy(sunDirection()).multiplyScalar(10);
+            inspect.controls.update();
+            inspect.renderer.render(inspect.scene, inspect.camera);
+        }
+
+        function closeInspect() {
+            inspect.open = false;
+            inspectEl.hidden = true;
+        }
+        document.getElementById('inspect-close').addEventListener('click', closeInspect);
+        window.addEventListener('keydown', e => { if (e.key === 'Escape' && inspect.open) closeInspect(); });
+        window.addEventListener('resize', () => { if (inspect.open) sizeInspect(); });
+
+    
+
+        const flybysBtn = document.getElementById('flybys-btn'), flybysPanel = document.getElementById('flybys');
+        const flybysList = document.getElementById('flybys-list'), flybysDays = document.getElementById('flybys-days');
+        const flybysTitle = document.getElementById('flybys-title');
+        let flybysRequest = 0;
+
+        async function loadFlybys() {
+            const request = ++flybysRequest; 
+            flybysList.textContent = 'Loading...';
+            flybysTitle.textContent = 'Upcoming flybys';
+            let rows;
+            try {
+                const res = await fetch(`${API}/upcoming-flybys?days=${flybysDays.value}`);
+                if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
+                rows = await res.json();
+            } catch (err) {
+                console.error(err);
+                if (request === flybysRequest) flybysList.textContent = 'Could not load flybys. Check main.py is running and try again.';
+                return;
+            }
+            if (request !== flybysRequest) return;
+            flybysList.innerHTML = '';
+            flybysTitle.textContent = `Upcoming flybys (${rows.length})`;
+            if (!rows.length) { flybysList.textContent = 'None in this period.'; return; }
+            rows.forEach(r => {
+                const km = +r.dist * AU_KM;
+                const item = document.createElement('div');
+                item.className = 'approach';
+                const text = document.createElement('div');
+                text.innerHTML = '<div></div><small></small>';
+                text.children[0].textContent = r.name + (r.pha ? '  ⚠' : '');
+            
+                const passed = +r.jd < dateToJd(Date.now()) ? '  (passed)' : '';
+                text.children[1].textContent = `${r.cd} UTC${passed} · ${(km / LD_KM).toFixed(2)} LD · ${(+r.v_rel).toFixed(1)} km/s`;
+                const go = document.createElement('button');
+                go.textContent = 'Watch';
+                go.disabled = r.spk_id == null;
+                go.title = r.spk_id == null ? 'Not in the database yet: run ingest.py to add new discoveries' : 'Select it and jump to one day before closest approach';
+                go.onclick = () => watchFlyby(r);
+                item.append(text, go);
+                flybysList.appendChild(item);
+            });
+        }
+
+        async function watchFlyby(r) {
+            try {
+                const res = await fetch(`${API}/asteroid/${r.spk_id}`);
+                if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
+                showAsteroid(await res.json());
+                watchApproach(+r.jd, +r.dist);
+               
+                if (matchMedia('(max-width: 640px)').matches) toggleFlybys(false);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function toggleFlybys(open) {
+            flybysPanel.hidden = !open;
+            flybysBtn.classList.toggle('active', open);
+            if (open) loadFlybys();
+        }
+        flybysBtn.addEventListener('click', () => toggleFlybys(flybysPanel.hidden));
+        flybysDays.addEventListener('change', loadFlybys);
+
+       
+        async function loadPath(ast, jd) {
+            try {
+                const res = await fetch(`${API}/approach-path?des=${encodeURIComponent(ast.pdes)}&start_jd=${jd - 1.1}&stop_jd=${jd + 1.1}&step_min=5`);
+                if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
+                const pts = await res.json();
+                if (selected !== ast || pts.length < 2) return;
+                ast.path = { jd0: pts[0][0], step: pts[1][0] - pts[0][0], n: pts.length, xyz: Float64Array.from(pts.flatMap(p => p.slice(1))) };
+            } catch (err) {
+                console.error('Precise path unavailable, using the orbit estimate:', err);
+            }
+        }
+
+        
+        function pathPos(ast, jd, out) {
+            const p = ast.path;
+            const i = p ? (jd + 69.2 / 86400 - p.jd0) / p.step : -1;  
+            ast.onPath = i >= 1 && i < p.n - 2;
+            if (!ast.onPath) return false;
+        
+            const k = Math.floor(i), f = i - k, f2 = f * f, f3 = f2 * f, e = bodies.earth.pos;
+            for (let c = 0; c < 3; c++) {
+                const p0 = p.xyz[3 * (k - 1) + c], p1 = p.xyz[3 * k + c], p2 = p.xyz[3 * (k + 1) + c], p3 = p.xyz[3 * (k + 2) + c];
+                out[c] = e[c] + 0.5 * (2 * p1 + (p2 - p0) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f2 + (3 * p1 - p0 - 3 * p2 + p3) * f3);
+            }
+            return true;
+        }
+    </script>
+</body>
+</html>
