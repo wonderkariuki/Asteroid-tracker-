@@ -84,8 +84,9 @@ Apophis in 2029; other passes use the page's orbit estimate.
 For daily updates, create a Deploy Hook in the Vercel project's Git settings, then save its URL as a
 GitHub repository secret named `VERCEL_DEPLOY_HOOK`. Treat that URL like a password.
 
-GitHub turns off scheduled jobs after 60 days without repository activity. If the "data from" date
-stops changing, turn the job back on from the repository's **Actions** tab.
+GitHub turns off scheduled jobs after 60 days without repository activity. To check, open
+`data/meta.json` on the live site: if its `updated` date stops changing, turn the job back on from the
+repository's **Actions** tab.
 
 ## Keeping data fresh
 

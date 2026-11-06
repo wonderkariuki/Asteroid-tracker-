@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
     <title>Asteroid Tracker</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: black; font-family: system-ui, sans-serif; color: #e8ecf2; }
@@ -74,10 +74,53 @@
 
         #details-toggle { display: none; }
 
+        .short-label { display: none; }
+
+        /* Phones, upright or sideways: the same tools, smaller, so more of the sky stays visible */
+        @media (max-width: 640px), (max-height: 500px) {
+            button { padding: 3px 7px; font-size: 11px; }
+            button, select, #jump-row input { min-height: 24px; box-sizing: border-box; }
+            #top-left { top: 6px; left: 6px; gap: 3px; max-width: calc(100vw - 12px); }
+            #info { padding: 3px 7px; font-size: 11px; }
+            #focus-bar, #filter-bar { padding: 3px; gap: 4px; font-size: 11px; }
+            #focus-bar label, #filter-bar label { gap: 3px; margin-left: 2px; }
+            #focus-bar input, #filter-bar input { width: 13px; height: 13px; margin: 0; }
+            #filter-bar select { padding: 1px 2px; font-size: 11px; }
+            #hint { padding: 1px 6px; font-size: 11px; }
+            #fly-btn { padding: 1px 6px; font-size: 11px; margin-left: 4px; }
+            #search-panel { top: 6px; right: 6px; width: 260px; }
+            #search-box { padding: 5px 8px; font-size: 13px; }
+            #results { max-height: 150px; }
+            #results li { padding: 4px 8px; font-size: 12px; }
+            #details { margin-top: 3px; padding: 5px 7px; font-size: 11px; }
+            #details .row { padding: 1px 0; }
+            #details h3 { margin: 5px 0 2px; font-size: 11px; }
+            #live-distance { font-size: 12px; }
+            .approach { padding: 2px 0; }
+            .approach small, #flybys-note, #size-compare small { font-size: 10px; }
+            #flybys { padding: 4px 6px; font-size: 11px; }
+            #flybys-head select { padding: 1px 2px; font-size: 11px; }
+            #flybys-note { margin: 1px 0 3px; }
+            #flybys-list { max-height: calc(100vh - 275px); }
+            #inspect-panel { padding: 6px 8px; font-size: 11px; }
+            #inspect-note { font-size: 10px; margin-top: 4px; }
+            #size-compare { margin-top: 4px; }
+            .size-bar { height: 6px; margin: 1px 0 3px; }
+            #time-bar { bottom: 6px; padding: 4px 8px; }
+            #clock { font-size: 12px; margin-bottom: 2px; }
+            #time-controls { gap: 5px; }
+            #rate-slider { min-width: 0; }
+            #rate-label { min-width: 72px; font-size: 11px; white-space: nowrap; }
+            #rate-ticks { display: none; }
+            #jump-row { gap: 4px; margin-top: 3px; font-size: 11px; white-space: nowrap; }
+            #jump-row input { flex: 1; min-width: 0; padding: 1px 4px; }
+        }
         @media (max-width: 640px) {
-            #flybys-list { max-height: 18vh; }
+            #focus-bar > span, #filter-bar > span, .long-label { display: none; }
+            .short-label { display: inline; }
+            #flybys-list { max-height: 28vh; }
             #inspect-panel { top: auto; bottom: 10px; max-height: 42vh; }
-            #search-panel { top: auto; bottom: 150px; left: 10px; right: 10px; width: auto; }
+            #search-panel { top: auto; bottom: 92px; left: 6px; right: 6px; width: auto; }
             #details { max-height: 30vh; }
             #rate-ticks { display: none; }
             #details-toggle { display: inline-block; }
@@ -132,7 +175,7 @@
             <button data-focus="earth">Earth</button>
             <button data-focus="asteroid" disabled>Asteroid</button>
             <label><input type="checkbox" id="planet-orbits"> Planet orbits</label>
-            <button id="flybys-btn">Upcoming flybys</button>
+            <button id="flybys-btn"><span class="long-label">Upcoming flybys</span><span class="short-label">Flybys</span></button>
         </div>
         <div id="filter-bar" class="panel">
             <span>Show:</span>
@@ -993,10 +1036,9 @@
                 if (show) shown++;
             });
             attr.needsUpdate = true;
-            info.innerText = (shown === swarm.count
+            info.innerText = shown === swarm.count
                 ? `Tracking ${shown.toLocaleString()} asteroids`
-                : `Showing ${shown.toLocaleString()} of ${swarm.count.toLocaleString()} asteroids`)
-                + (swarm.updated ? ` · data from ${swarm.updated}` : '');
+                : `Showing ${shown.toLocaleString()} of ${swarm.count.toLocaleString()} asteroids`;
         }
         for (const el of [hazardBox, classFilter, sizeFilter]) el.addEventListener('change', applyFilters);
 
@@ -1005,7 +1047,6 @@
             try {
                 info.innerText = 'Fetching asteroids...';
                 const rows = await source.allAsteroids();
-                swarm.updated = (await getStaticMeta())?.updated;
                 makeSwarm(rows.filter(a => a.e < 1 && a.a_au > 0));
                 applyFilters();
             } catch (error) {
