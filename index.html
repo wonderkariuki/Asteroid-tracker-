@@ -88,13 +88,38 @@
             #keys-hint, #g-hint { display: none; }
         }
     </style>
-    <script type="importmap">
-    {
-        "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-        }
-    }
+    <script>
+        // Runs before the main script, so a phone that can't run the site gets a reason instead of "Loading..." forever.
+        (function () {
+            function report(reason) {
+                const show = () => {
+                    const info = document.getElementById('info');
+                    if (info && info.textContent === 'Loading...') info.textContent = reason;
+                };
+                if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show);
+                else show();
+            }
+
+            // A cause known up front wins over the less helpful error it goes on to trigger
+            let known = null;
+            if (!document.createElement('canvas').getContext('webgl2')) known = 'This browser can\'t show 3D graphics (WebGL 2 is off or unsupported). Try updating it, or another browser.';
+            else if (!(HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'))) known = 'This browser is too old for this site. Please update it, or try another browser.';
+
+            window.addEventListener('error', e => {
+                if (e.target && e.target.tagName === 'SCRIPT') report(known || 'Could not download the 3D library. Check your connection or ad blocker, then reload.');
+                else if (e.target === window) report(known || 'Could not start (' + e.message + ').');
+            }, true);
+            window.addEventListener('unhandledrejection', e => report(known || 'Could not start (' + ((e.reason && e.reason.message) || e.reason) + ').'));
+            setTimeout(() => report('Still starting. On a slow connection this can take a while; if it doesn\'t finish, reload the page.'), 30000);
+
+            // The library is part of the site. A page opened straight from the folder can't load local scripts, so it uses the CDN.
+            const fromFolder = location.protocol === 'file:' || location.port === '5500';
+            const base = fromFolder ? 'https://cdn.jsdelivr.net/npm/three@0.160.0/' : './vendor/three/';
+            const map = document.createElement('script');
+            map.type = 'importmap';
+            map.textContent = JSON.stringify({ imports: { three: base + 'build/three.module.js', 'three/addons/': base + 'examples/jsm/' } });
+            document.currentScript.after(map);
+        })();
     </script>
 </head>
 

@@ -164,6 +164,7 @@ def main():
     out.mkdir(parents=True)
     shutil.copy(HERE / "index.html", out / "index.html")
     shutil.copytree(HERE / "images", out / "images")
+    shutil.copytree(HERE / "vendor", out / "vendor")
     (out / ".nojekyll").touch()   # tells GitHub to publish the files exactly as they are
 
     rows = fetch_catalogue()

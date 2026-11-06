@@ -18,6 +18,7 @@ approaches at adjustable speed.
 | `schema.sql` | Creates the database tables |
 | `asteroid_tracker.sql` | Creates the `asteroid_tracker` database |
 | `images/` | Earth and Moon textures |
+| `vendor/three/` | The three.js 3D library (version 0.160.0, MIT license), kept with the site |
 | `sbdb_query2.json` | A saved JPL download, loadable with `--from-file` |
 
 ## First-time setup

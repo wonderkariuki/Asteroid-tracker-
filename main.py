@@ -24,6 +24,7 @@ app.add_middleware(
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5) 
 app.mount("/images", StaticFiles(directory=HERE / "images"), name="images")   # Earth/Moon textures
+app.mount("/vendor", StaticFiles(directory=HERE / "vendor"), name="vendor")   # the three.js 3D library
 
 
 POOL_SIZE = 10
